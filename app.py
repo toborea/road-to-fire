@@ -71,7 +71,7 @@ edited_df = st.data_editor(
     st.session_state.portfolio,
     num_rows="dynamic",
     use_container_width=True,
-    column_order=["Ticker", "Shares"], # Fixed layout
+    column_order=["Ticker", "Shares"],
     column_config={
         "Ticker": st.column_config.TextColumn("Ticker Symbol", required=True),
         "Shares": st.column_config.NumberColumn("Number of Shares", format="%.3f", required=True)
@@ -79,8 +79,9 @@ edited_df = st.data_editor(
 )
 st.session_state.portfolio = edited_df
 
-# --- FEATURE: LIVE ANALYSIS & ADVICE ---
-live_data = []
+# --- FEATURE: LIVE ANALYSIS & TICKER PRICES ---
+st.subheader("Current Holdings & Live Prices")
+live_details = []
 total_brokerage_value = 0.0
 tickers_str = " ".join(edited_df["Ticker"].astype(str).tolist())
 
@@ -88,27 +89,39 @@ with st.spinner("Fetching live prices..."):
     for _, row in edited_df.iterrows():
         try:
             ticker = str(row["Ticker"]).upper().strip()
+            shares = float(row["Shares"])
             asset = yf.Ticker(ticker)
             price = asset.info.get('currentPrice') or asset.info.get('regularMarketPrice')
             er = asset.info.get('annualReportExpenseRatio') or asset.info.get('expenseRatio', 0)
             if price:
-                total_brokerage_value += (price * float(row["Shares"]))
-                live_data.append({"Ticker": ticker, "ER": er*100})
+                total_brokerage_value += (price * shares)
+                live_details.append({
+                    "Ticker": ticker, 
+                    "Shares": shares, 
+                    "Live Price": f"${price:,.2f}", 
+                    "Total Value": f"${(price * shares):,.2f}", 
+                    "ER": er*100
+                })
         except: pass
 
-st.subheader("Current Values")
+# Display live price table
+if live_details:
+    st.table(pd.DataFrame(live_details).set_index("Ticker"))
+
+# Advice
+st.subheader("Automated Portfolio Advice")
+if "VOO" in tickers_str and "VFIAX" in tickers_str: st.error("⚠️ Redundancy: Consolidate VOO and VFIAX.")
+if "VOO" in tickers_str and "VTI" in tickers_str: st.warning("⚠️ Overlap: VTI is 85% identical to VOO.")
+for item in live_details:
+    if item.get("ER", 0) > 0.15: st.warning(f"⚠️ Fee Notice: {item['Ticker']} has an expense ratio of {item.get('ER', 0):.2f}%.")
+
+# --- FEATURE: SNAPSHOTS & PROJECTION ---
+st.subheader("Current Values & Net Worth")
 col1, col2, col3 = st.columns(3)
 col1.metric("Cash (HYSA)", f"${hysa_bal:,.2f}")
 col2.metric("Brokerage (Live)", f"${total_brokerage_value:,.2f}")
 col3.metric("Total Net Worth", f"${(hysa_bal + total_brokerage_value):,.2f}")
 
-st.subheader("Automated Portfolio Advice")
-if "VOO" in tickers_str and "VFIAX" in tickers_str: st.error("⚠️ Redundancy: Consolidate VOO and VFIAX.")
-if "VOO" in tickers_str and "VTI" in tickers_str: st.warning("⚠️ Overlap: VTI is 85% identical to VOO.")
-for item in live_data:
-    if item.get("ER", 0) > 0.15: st.warning(f"⚠️ Fee Notice: {item['Ticker']} has high fees.")
-
-# --- FEATURE: SNAPSHOTS & PROJECTION ---
 st.subheader("Historical Snapshots & Projection")
 if st.button("💾 Save Current Net Worth Snapshot"):
     new_snapshot = pd.DataFrame({
