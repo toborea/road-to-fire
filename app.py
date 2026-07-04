@@ -49,17 +49,15 @@ if st.button("🚀 Process Uploaded Screenshots"):
                 lines = text.split('\n')
                 
                 for line in lines:
-                    # Regex for Ticker and Shares
-                    match = re.search(r'\b([A-Z]{1,5})\b.*?\b(\d{1,3}(?:,\d{3})*\.\d{3})\b', line)
+                    # UPDATED REGEX: Matches Ticker, skips the $ Balance, captures the 3-decimal Quantity
+                    match = re.search(r'([A-Z]{1,5}).*?\$[\d,]+\.\d{2}\s+(\d+\.\d{3})', line)
                     if match:
-                        # Fix: Normalize string to prevent duplication/mismatch
-                        ticker = match.group(1).strip().upper() 
-                        shares_str = match.group(2).replace(',', '')
-                        shares = float(shares_str)
+                        ticker = match.group(1).strip().upper()
+                        shares = float(match.group(2).replace(',', ''))
                         
                         if ticker in ['LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE']: continue
                         
-                        # Update logic
+                        # Update existing or add new
                         if ticker in st.session_state.portfolio["Ticker"].str.upper().values:
                             st.session_state.portfolio.loc[st.session_state.portfolio["Ticker"].str.upper() == ticker, "Shares"] = shares
                         else:
