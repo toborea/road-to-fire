@@ -39,35 +39,37 @@ brok_return = st.sidebar.slider("Expected Market Return (%)", 4.0, 15.0, 9.0, 0.
 st.subheader("📷 Auto-Update Tickers & Shares")
 uploaded_files = st.file_uploader("Upload Brokerage Screenshots", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
 
-if uploaded_files:
-    for uploaded_file in uploaded_files:
-        image = Image.open(uploaded_file)
-        with st.spinner(f"Processing {uploaded_file.name}..."):
-            text = pytesseract.image_to_string(image)
-            secure_cleanup(image)
-            lines = text.split('\n')
-            found_data = False
-            for line in lines:
-                match = re.search(r'\b([A-Z]{1,5})\b.*?\b(\d{1,3}(?:,\d{3})*\.\d{3})\b', line)
-                if match:
-                    ticker = match.group(1)
-                    shares_str = match.group(2).replace(',', '')
-                    shares = float(shares_str)
-                    if ticker in ['LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE']: continue
-                    
-                    if ticker in st.session_state.portfolio["Ticker"].values:
-                        st.session_state.portfolio.loc[st.session_state.portfolio["Ticker"] == ticker, "Shares"] = shares
-                    else:
-                        new_row = pd.DataFrame({"Ticker": [ticker], "Shares": [shares]})
-                        st.session_state.portfolio = pd.concat([st.session_state.portfolio, new_row], ignore_index=True)
-                    found_data = True
-            if found_data: st.success(f"Successfully processed {uploaded_file.name}")
-            else: st.warning(f"Could not map data in {uploaded_file.name}.")
-    st.rerun()
+# Process only when button is pressed to prevent infinite loop
+if st.button("🚀 Process Uploaded Screenshots"):
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            image = Image.open(uploaded_file)
+            with st.spinner(f"Processing {uploaded_file.name}..."):
+                text = pytesseract.image_to_string(image)
+                secure_cleanup(image)
+                lines = text.split('\n')
+                found_data = False
+                for line in lines:
+                    match = re.search(r'\b([A-Z]{1,5})\b.*?\b(\d{1,3}(?:,\d{3})*\.\d{3})\b', line)
+                    if match:
+                        ticker = match.group(1)
+                        shares_str = match.group(2).replace(',', '')
+                        shares = float(shares_str)
+                        if ticker in ['LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE']: continue
+                        
+                        if ticker in st.session_state.portfolio["Ticker"].values:
+                            st.session_state.portfolio.loc[st.session_state.portfolio["Ticker"] == ticker, "Shares"] = shares
+                        else:
+                            new_row = pd.DataFrame({"Ticker": [ticker], "Shares": [shares]})
+                            st.session_state.portfolio = pd.concat([st.session_state.portfolio, new_row], ignore_index=True)
+                        found_data = True
+                if found_data: st.success(f"Successfully processed {uploaded_file.name}")
+                else: st.warning(f"Could not map data in {uploaded_file.name}.")
+    else:
+        st.warning("Please upload files first.")
 
 # --- FEATURE: MASTER PORTFOLIO EDITOR ---
 st.subheader("Your Personal Holdings")
-# Added key="portfolio_editor" to prevent sidebar interactions from resetting the table
 edited_df = st.data_editor(
     st.session_state.portfolio,
     num_rows="dynamic",
@@ -106,7 +108,6 @@ with st.spinner("Fetching live prices..."):
                 })
         except: pass
 
-# Display live price table
 if live_details:
     st.table(pd.DataFrame(live_details).set_index("Ticker"))
 
@@ -134,12 +135,10 @@ if st.button("💾 Save Current Net Worth Snapshot"):
     })
     st.session_state.history = pd.concat([st.session_state.history, new_snapshot], ignore_index=True)
 
-# History Plot
 if not st.session_state.history.empty:
     st.write("### Your Progress")
     st.line_chart(st.session_state.history.set_index("Date")[["HYSA", "Brokerage", "Total"]])
 
-# Future Projection Chart
 st.write("### Future Projection to $500k")
 months, hysa_curr, brok_curr = 0, hysa_bal, total_brokerage_value
 proj_data = [{"Month": 0, "HYSA": hysa_curr, "Brokerage": brok_curr}]
