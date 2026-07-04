@@ -39,30 +39,38 @@ if uploaded_files:
     for uploaded_file in uploaded_files:
         image = Image.open(uploaded_file)
         with st.spinner(f"Processing {uploaded_file.name}..."):
+            # Extract text from image
             text = pytesseract.image_to_string(image)
             secure_cleanup(image)
             
-            # Updated Regex: 
-            # 1. Matches Ticker (\b[A-Z]{1,5})
-            # 2. Skips balance/noise ([^$]*)
-            # 3. Matches quantity ([\d,]+\.?\d*)
-            matches = re.findall(r'\b([A-Z]{1,5})\s+[^$]*\s+([\d,]+\.?\d*)', text)
+            # This logic splits the text by lines to look for the pattern line-by-line
+            lines = text.split('\n')
+            found_data = False
             
-            if matches:
-                for ticker, shares_str in matches:
-                    if ticker in ['LIST', 'TABLE', 'SYMBOL', 'NAME', 'CURRENT', 'BALANCE', 'QUANTITY']:
+            for line in lines:
+                # Look for lines that contain a ticker and a number
+                # Regex looks for Ticker (uppercase, 1-5 letters) followed by some characters, then a decimal number
+                match = re.search(r'\b([A-Z]{1,5})\b.*?\b(\d{1,3}(?:,\d{3})*\.\d{3})\b', line)
+                
+                if match:
+                    ticker = match.group(1)
+                    shares_str = match.group(2).replace(',', '')
+                    shares = float(shares_str)
+                    
+                    if ticker in ['LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY']:
                         continue
-                    try:
-                        shares = float(shares_str.replace(',', ''))
-                        if ticker in st.session_state.portfolio["Ticker"].values:
-                            st.session_state.portfolio.loc[st.session_state.portfolio["Ticker"] == ticker, "Shares"] = shares
-                        else:
-                            new_row = pd.DataFrame({"Ticker": [ticker], "Shares": [shares]})
-                            st.session_state.portfolio = pd.concat([st.session_state.portfolio, new_row], ignore_index=True)
-                    except: continue
+                        
+                    if ticker in st.session_state.portfolio["Ticker"].values:
+                        st.session_state.portfolio.loc[st.session_state.portfolio["Ticker"] == ticker, "Shares"] = shares
+                    else:
+                        new_row = pd.DataFrame({"Ticker": [ticker], "Shares": [shares]})
+                        st.session_state.portfolio = pd.concat([st.session_state.portfolio, new_row], ignore_index=True)
+                    found_data = True
+            
+            if found_data:
                 st.success(f"Successfully processed {uploaded_file.name}")
             else:
-                st.warning(f"Could not map data in {uploaded_file.name}. Ensure you are using the 'Table' view.")
+                st.warning(f"Could not map data in {uploaded_file.name}. OCR text was: {text[:100]}...") # Debug info
     st.rerun()
 
 # --- FEATURE: MASTER PORTFOLIO EDITOR ---
