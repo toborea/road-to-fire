@@ -41,11 +41,17 @@ if uploaded_files:
         with st.spinner(f"Processing {uploaded_file.name}..."):
             text = pytesseract.image_to_string(image)
             secure_cleanup(image)
-            # Regex: Ticker [spaces] Optional Other Text [spaces] Number
-            matches = re.findall(r'\b([A-Z]{1,5})\s+[\w\s]+\s+([\d,]+\.?\d*)', text)
+            
+            # Updated Regex: 
+            # 1. Matches Ticker (\b[A-Z]{1,5})
+            # 2. Skips balance/noise ([^$]*)
+            # 3. Matches quantity ([\d,]+\.?\d*)
+            matches = re.findall(r'\b([A-Z]{1,5})\s+[^$]*\s+([\d,]+\.?\d*)', text)
             
             if matches:
                 for ticker, shares_str in matches:
+                    if ticker in ['LIST', 'TABLE', 'SYMBOL', 'NAME', 'CURRENT', 'BALANCE', 'QUANTITY']:
+                        continue
                     try:
                         shares = float(shares_str.replace(',', ''))
                         if ticker in st.session_state.portfolio["Ticker"].values:
@@ -54,9 +60,9 @@ if uploaded_files:
                             new_row = pd.DataFrame({"Ticker": [ticker], "Shares": [shares]})
                             st.session_state.portfolio = pd.concat([st.session_state.portfolio, new_row], ignore_index=True)
                     except: continue
-                st.success(f"Updated from {uploaded_file.name}")
+                st.success(f"Successfully processed {uploaded_file.name}")
             else:
-                st.warning(f"Could not map data in {uploaded_file.name}. Ensure Ticker and Quantity are visible.")
+                st.warning(f"Could not map data in {uploaded_file.name}. Ensure you are using the 'Table' view.")
     st.rerun()
 
 # --- FEATURE: MASTER PORTFOLIO EDITOR ---
