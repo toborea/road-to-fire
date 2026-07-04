@@ -25,7 +25,7 @@ if 'portfolio' not in st.session_state:
     })
 
 if 'history' not in st.session_state:
-    st.session_state.history = pd.DataFrame(columns=["Date", "TotalValue"])
+    st.session_state.history = pd.DataFrame(columns=["Date", "HYSA", "Brokerage", "Total"])
 
 # --- SIDEBAR: FINANCIAL INPUTS ---
 st.sidebar.header("Cash & Future Savings")
@@ -61,11 +61,8 @@ if uploaded_files:
                         new_row = pd.DataFrame({"Ticker": [ticker], "Shares": [shares]})
                         st.session_state.portfolio = pd.concat([st.session_state.portfolio, new_row], ignore_index=True)
                     found_data = True
-            
-            if found_data:
-                st.success(f"Successfully processed {uploaded_file.name}")
-            else:
-                st.warning(f"Could not map data in {uploaded_file.name}.")
+            if found_data: st.success(f"Successfully processed {uploaded_file.name}")
+            else: st.warning(f"Could not map data in {uploaded_file.name}.")
     st.rerun()
 
 # --- FEATURE: MASTER PORTFOLIO EDITOR ---
@@ -74,6 +71,7 @@ edited_df = st.data_editor(
     st.session_state.portfolio,
     num_rows="dynamic",
     use_container_width=True,
+    column_order=["Ticker", "Shares"], # Fixed layout
     column_config={
         "Ticker": st.column_config.TextColumn("Ticker Symbol", required=True),
         "Shares": st.column_config.NumberColumn("Number of Shares", format="%.3f", required=True)
@@ -98,7 +96,12 @@ with st.spinner("Fetching live prices..."):
                 live_data.append({"Ticker": ticker, "ER": er*100})
         except: pass
 
-# Advice
+st.subheader("Current Values")
+col1, col2, col3 = st.columns(3)
+col1.metric("Cash (HYSA)", f"${hysa_bal:,.2f}")
+col2.metric("Brokerage (Live)", f"${total_brokerage_value:,.2f}")
+col3.metric("Total Net Worth", f"${(hysa_bal + total_brokerage_value):,.2f}")
+
 st.subheader("Automated Portfolio Advice")
 if "VOO" in tickers_str and "VFIAX" in tickers_str: st.error("⚠️ Redundancy: Consolidate VOO and VFIAX.")
 if "VOO" in tickers_str and "VTI" in tickers_str: st.warning("⚠️ Overlap: VTI is 85% identical to VOO.")
@@ -107,27 +110,33 @@ for item in live_data:
 
 # --- FEATURE: SNAPSHOTS & PROJECTION ---
 st.subheader("Historical Snapshots & Projection")
-total_current = hysa_bal + total_brokerage_value
-
 if st.button("💾 Save Current Net Worth Snapshot"):
-    new_snapshot = pd.DataFrame({"Date": [datetime.now().strftime("%Y-%m-%d")], "TotalValue": [total_current]})
+    new_snapshot = pd.DataFrame({
+        "Date": [datetime.now().strftime("%Y-%m-%d")], 
+        "HYSA": [hysa_bal], 
+        "Brokerage": [total_brokerage_value], 
+        "Total": [hysa_bal + total_brokerage_value]
+    })
     st.session_state.history = pd.concat([st.session_state.history, new_snapshot], ignore_index=True)
 
-# Plotting Trends
-col1, col2 = st.columns(2)
-with col1:
-    st.metric("Total Net Worth", f"${total_current:,.2f}")
-    if not st.session_state.history.empty:
-        st.line_chart(st.session_state.history.set_index("Date"))
+# History Plot
+if not st.session_state.history.empty:
+    st.write("### Your Progress")
+    st.line_chart(st.session_state.history.set_index("Date")[["HYSA", "Brokerage", "Total"]])
 
-with col2:
-    st.write("Future Projection (to $500k)")
-    months, hysa_curr, brok_curr = 0, hysa_bal, total_brokerage_value
-    timeline = [{"Month": 0, "Total": total_current}]
-    while total_current < 500000 and months < 120:
-        months += 1
-        hysa_curr = (hysa_curr * (1 + hysa_yield/12)) + hysa_cont
-        brok_curr = (brok_curr * (1 + brok_return/12)) + brok_cont
-        total_current = hysa_curr + brok_curr
-        timeline.append({"Month": months, "Total": total_current})
-    st.line_chart(pd.DataFrame(timeline).set_index("Month"))
+# Future Projection Chart
+st.write("### Future Projection to $500k")
+months, hysa_curr, brok_curr = 0, hysa_bal, total_brokerage_value
+proj_data = [{"Month": 0, "HYSA": hysa_curr, "Brokerage": brok_curr}]
+while (hysa_curr + brok_curr) < 500000 and months < 120:
+    months += 1
+    hysa_curr = (hysa_curr * (1 + hysa_yield/12)) + hysa_cont
+    brok_curr = (brok_curr * (1 + brok_return/12)) + brok_cont
+    proj_data.append({"Month": months, "HYSA": hysa_curr, "Brokerage": brok_curr})
+
+df_proj = pd.DataFrame(proj_data).set_index("Month")
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=df_proj.index, y=df_proj["HYSA"], name="HYSA", stackgroup='one', line=dict(color='#3b82f6')))
+fig.add_trace(go.Scatter(x=df_proj.index, y=df_proj["Brokerage"], name="Brokerage", stackgroup='one', line=dict(color='#10b981')))
+fig.update_layout(template="plotly_dark", height=400, xaxis_title="Months", yaxis_title="Total Value ($)")
+st.plotly_chart(fig, use_container_width=True)
