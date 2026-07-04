@@ -6,6 +6,7 @@ import pytesseract
 from PIL import Image
 import re
 import gc
+from datetime import datetime
 
 # Page Setup
 st.set_page_config(page_title="Live Portfolio Tracker", page_icon="📈", layout="wide")
@@ -16,12 +17,15 @@ def secure_cleanup(image_obj):
     del image_obj
     gc.collect()
 
-# Initialize session state for portfolio
+# Initialize session state
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = pd.DataFrame({
         "Ticker": ["VOO", "VFIAX", "VTI", "VTV", "VT", "VXUS", "IJH", "AMD", "GOOGL", "CVS"],
         "Shares": [78.467, 18.0, 15.0, 25.0, 80.0, 200.0, 15.0, 34.0, 50.0, 30.0]
     })
+
+if 'history' not in st.session_state:
+    st.session_state.history = pd.DataFrame(columns=["Date", "TotalValue"])
 
 # --- SIDEBAR: FINANCIAL INPUTS ---
 st.sidebar.header("Cash & Future Savings")
@@ -31,7 +35,7 @@ hysa_yield = st.sidebar.slider("HYSA Annual Yield (%)", 1.0, 6.0, 4.2, 0.1) / 10
 brok_cont = st.sidebar.number_input("Monthly Brokerage Cont. ($)", value=5000.0, step=100.0)
 brok_return = st.sidebar.slider("Expected Market Return (%)", 4.0, 15.0, 9.0, 0.5) / 100
 
-# --- FEATURE: MULTI-FILE SCREENSHOT SCANNER ---
+# --- FEATURE: SCREENSHOT SCANNER ---
 st.subheader("📷 Auto-Update Tickers & Shares")
 uploaded_files = st.file_uploader("Upload Brokerage Screenshots", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
 
@@ -41,18 +45,15 @@ if uploaded_files:
         with st.spinner(f"Processing {uploaded_file.name}..."):
             text = pytesseract.image_to_string(image)
             secure_cleanup(image)
-            
             lines = text.split('\n')
             found_data = False
             for line in lines:
-                # Regex looks for Ticker (uppercase, 1-5 letters) followed by any characters, then a decimal number
                 match = re.search(r'\b([A-Z]{1,5})\b.*?\b(\d{1,3}(?:,\d{3})*\.\d{3})\b', line)
                 if match:
                     ticker = match.group(1)
                     shares_str = match.group(2).replace(',', '')
                     shares = float(shares_str)
-                    if ticker in ['LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE']:
-                        continue
+                    if ticker in ['LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE']: continue
                     
                     if ticker in st.session_state.portfolio["Ticker"].values:
                         st.session_state.portfolio.loc[st.session_state.portfolio["Ticker"] == ticker, "Shares"] = shares
@@ -64,7 +65,7 @@ if uploaded_files:
             if found_data:
                 st.success(f"Successfully processed {uploaded_file.name}")
             else:
-                st.warning(f"Could not map data in {uploaded_file.name}. Ensure you are using the 'Table' view.")
+                st.warning(f"Could not map data in {uploaded_file.name}.")
     st.rerun()
 
 # --- FEATURE: MASTER PORTFOLIO EDITOR ---
@@ -80,56 +81,53 @@ edited_df = st.data_editor(
 )
 st.session_state.portfolio = edited_df
 
-# --- FEATURE: LIVE ANALYSIS, ADVICE & PROJECTION ---
-if not edited_df.empty:
-    live_data = []
-    total_brokerage_value = 0.0
-    tickers_str = " ".join(edited_df["Ticker"].astype(str).tolist())
-    
-    with st.spinner("Fetching live prices & checking health..."):
-        for _, row in edited_df.iterrows():
+# --- FEATURE: LIVE ANALYSIS & ADVICE ---
+live_data = []
+total_brokerage_value = 0.0
+tickers_str = " ".join(edited_df["Ticker"].astype(str).tolist())
+
+with st.spinner("Fetching live prices..."):
+    for _, row in edited_df.iterrows():
+        try:
             ticker = str(row["Ticker"]).upper().strip()
-            shares = float(row["Shares"])
-            try:
-                asset = yf.Ticker(ticker)
-                info = asset.info
-                price = info.get('currentPrice') or info.get('regularMarketPrice')
-                er = info.get('annualReportExpenseRatio') or info.get('expenseRatio', 0)
-                er_pct = er * 100 if er else 0.0
-                
-                if price:
-                    total_brokerage_value += (price * shares)
-                    live_data.append({"Ticker": ticker, "Raw ER": er_pct})
-            except: pass
+            asset = yf.Ticker(ticker)
+            price = asset.info.get('currentPrice') or asset.info.get('regularMarketPrice')
+            er = asset.info.get('annualReportExpenseRatio') or asset.info.get('expenseRatio', 0)
+            if price:
+                total_brokerage_value += (price * float(row["Shares"]))
+                live_data.append({"Ticker": ticker, "ER": er*100})
+        except: pass
 
-    # Automated Advice
-    st.subheader("Automated Portfolio Advice")
-    if "VOO" in tickers_str and "VFIAX" in tickers_str:
-        st.error("⚠️ **Redundancy Alert:** You hold both VOO and VFIAX (identical S&P 500 tracking). Consolidate into one.")
-    if "VOO" in tickers_str and "VTI" in tickers_str:
-        st.warning("⚠️ **Overlap Alert:** VTI is 85% identical to VOO. Holding both creates unnecessary duplication.")
-    for item in live_data:
-        if item.get("Raw ER", 0) > 0.15:
-            st.warning(f"⚠️ **Fee Notice:** {item['Ticker']} has an expense ratio of {item['Raw ER']:.2f}%. Watch for fee drag.")
+# Advice
+st.subheader("Automated Portfolio Advice")
+if "VOO" in tickers_str and "VFIAX" in tickers_str: st.error("⚠️ Redundancy: Consolidate VOO and VFIAX.")
+if "VOO" in tickers_str and "VTI" in tickers_str: st.warning("⚠️ Overlap: VTI is 85% identical to VOO.")
+for item in live_data:
+    if item.get("ER", 0) > 0.15: st.warning(f"⚠️ Fee Notice: {item['Ticker']} has high fees.")
 
-    # Projection
-    st.subheader("The Path to $500,000")
-    total_current = hysa_bal + total_brokerage_value
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Cash", f"${hysa_bal:,.2f}")
-    col2.metric("Brokerage", f"${total_brokerage_value:,.2f}")
-    col3.metric("Total", f"${total_current:,.2f}")
+# --- FEATURE: SNAPSHOTS & PROJECTION ---
+st.subheader("Historical Snapshots & Projection")
+total_current = hysa_bal + total_brokerage_value
 
-    # Calculation loop
+if st.button("💾 Save Current Net Worth Snapshot"):
+    new_snapshot = pd.DataFrame({"Date": [datetime.now().strftime("%Y-%m-%d")], "TotalValue": [total_current]})
+    st.session_state.history = pd.concat([st.session_state.history, new_snapshot], ignore_index=True)
+
+# Plotting Trends
+col1, col2 = st.columns(2)
+with col1:
+    st.metric("Total Net Worth", f"${total_current:,.2f}")
+    if not st.session_state.history.empty:
+        st.line_chart(st.session_state.history.set_index("Date"))
+
+with col2:
+    st.write("Future Projection (to $500k)")
     months, hysa_curr, brok_curr = 0, hysa_bal, total_brokerage_value
-    timeline_data = [{"Month": 0, "Total": total_current}]
+    timeline = [{"Month": 0, "Total": total_current}]
     while total_current < 500000 and months < 120:
         months += 1
         hysa_curr = (hysa_curr * (1 + hysa_yield/12)) + hysa_cont
         brok_curr = (brok_curr * (1 + brok_return/12)) + brok_cont
         total_current = hysa_curr + brok_curr
-        timeline_data.append({"Month": months, "Total": total_current})
-
-    fig = go.Figure(go.Scatter(x=[d["Month"] for d in timeline_data], y=[d["Total"] for d in timeline_data], line=dict(color='#10b981')))
-    fig.update_layout(template="plotly_dark", height=300)
-    st.plotly_chart(fig, use_container_width=True)
+        timeline.append({"Month": months, "Total": total_current})
+    st.line_chart(pd.DataFrame(timeline).set_index("Month"))
