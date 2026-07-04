@@ -67,10 +67,12 @@ if uploaded_files:
 
 # --- FEATURE: MASTER PORTFOLIO EDITOR ---
 st.subheader("Your Personal Holdings")
+# Added key="portfolio_editor" to prevent sidebar interactions from resetting the table
 edited_df = st.data_editor(
     st.session_state.portfolio,
     num_rows="dynamic",
     use_container_width=True,
+    key="portfolio_editor",
     column_order=["Ticker", "Shares"],
     column_config={
         "Ticker": st.column_config.TextColumn("Ticker Symbol", required=True),
