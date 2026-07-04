@@ -49,13 +49,15 @@ if st.button("🚀 Process Uploaded Screenshots"):
                 lines = text.split('\n')
                 
                 for line in lines:
-                    # UPDATED REGEX: Matches Ticker, skips the $ Balance, captures the 3-decimal Quantity
-                    match = re.search(r'([A-Z]{1,5}).*?\$[\d,]+\.\d{2}\s+(\d+\.\d{3})', line)
+                    # UPDATED REGEX: Specifically looks for lines that contain a ticker-like string and a price/quantity sequence
+                    match = re.search(r'([A-Z]{2,5}).*?\$[\d,]+\.\d{2}\s+(\d+\.\d{3})', line)
                     if match:
                         ticker = match.group(1).strip().upper()
                         shares = float(match.group(2).replace(',', ''))
                         
-                        if ticker in ['LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE']: continue
+                        # CLEANUP: Ignore weird small strings that OCR misidentifies as tickers
+                        if len(ticker) < 2 or ticker in ['LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE', 'ETFS']: 
+                            continue
                         
                         # Update existing or add new
                         if ticker in st.session_state.portfolio["Ticker"].str.upper().values:
