@@ -21,7 +21,7 @@ def secure_cleanup(image_obj):
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = pd.DataFrame({
         "Ticker": ["VOO", "VFIAX", "VTI", "VTV", "VT", "VXUS", "IJH", "AMD", "GOOGL", "CVS"],
-        "Shares": [78.467, 18.0, 15.0, 25.0, 80.0, 200.0, 15.0, 34.0, 50.0, 30.0]
+        "Shares": [78.467, 13.331, 15.0, 16.945, 55.84, 144.637, 231.016, 34.0, 13.024, 30.0]
     })
 
 if 'history' not in st.session_state:
@@ -46,22 +46,29 @@ if st.button("🚀 Process Uploaded Screenshots"):
         for uploaded_file in uploaded_files:
             image = Image.open(uploaded_file)
             with st.spinner(f"Processing {uploaded_file.name}..."):
-                # FIX: --psm 6 forces Tesseract to read text in uniform horizontal rows (perfect for UI tables)
                 text = pytesseract.image_to_string(image, config='--psm 6')
                 secure_cleanup(image)
                 
                 for line in text.split('\n'):
-                    # FIX: Find 1-5 letters at the START of the line, then skip forward to the FIRST 3-decimal number.
-                    # This completely bypasses misread dollar signs or long company names.
-                    match = re.search(r'^\s*[^a-zA-Z]*([A-Z]{1,5})\b.*?(\d+[\.,]\d{3})\b', line)
+                    # FIX: The regex now uses a Negative Lookahead (?!\d|\.). 
+                    # This prevents the scanner from grabbing the thousands comma in account balances (e.g., $9,205.72)
+                    match = re.search(r'^\s*[^a-zA-Z]*([A-Z]{1,5})\b.*?([\d,]+[.,]\d{3})(?!\d|\.)', line)
                     
                     if match:
                         ticker = match.group(1).strip().upper()
-                        # If OCR accidentally reads a comma instead of a period for shares (e.g., 78,467), fix it
-                        shares_str = match.group(2).replace(',', '.')
-                        shares = float(shares_str)
+                        raw_shares = match.group(2)
                         
-                        # Extended filter to catch headers or structural UI text that might look like tickers
+                        # FIX: Bulletproof decimal conversion. 
+                        # Whether OCR reads "13.331", "13,331", or "1,234.567", this handles it safely.
+                        if len(raw_shares) >= 4 and raw_shares[-4] in [',', '.']:
+                            whole_part = raw_shares[:-4].replace(',', '').replace('.', '')
+                            fractional_part = raw_shares[-3:]
+                            if not whole_part: whole_part = "0"
+                            shares = float(f"{whole_part}.{fractional_part}")
+                        else:
+                            shares = float(raw_shares.replace(',', '.'))
+                        
+                        # Filter out common UI headers
                         ignore_list = [
                             'LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE', 'ETFS', 
                             'FUNDS', 'STOCKS', 'OPTIONS', 'SYMBOL', 'CURRENT', 'BALANCE', 
@@ -73,23 +80,19 @@ if st.button("🚀 Process Uploaded Screenshots"):
                 
                 st.success(f"Finished processing {uploaded_file.name}")
         
-        # FIX: Merge (Upsert) logic instead of complete wipe
+        # Merge Scanned Data with existing manual data
         if scanned_data:
-            # Get current table as a dictionary
             curr_df = st.session_state.portfolio
             curr_dict = dict(zip(curr_df['Ticker'], curr_df['Shares']))
             
-            # Update dictionary with new scanned values (adds new ones, updates existing ones, keeps typed ones)
             for t, s in scanned_data.items():
                 curr_dict[t] = s
                 
-            # Convert back to DataFrame
             st.session_state.portfolio = pd.DataFrame({
                 "Ticker": list(curr_dict.keys()),
                 "Shares": list(curr_dict.values())
             })
             
-            # Clear editor state to force UI refresh
             if "portfolio_editor" in st.session_state:
                 del st.session_state["portfolio_editor"]
                 
