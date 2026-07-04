@@ -41,7 +41,6 @@ uploaded_files = st.file_uploader("Upload Brokerage Screenshots", type=["png", "
 
 if st.button("🚀 Process Uploaded Screenshots"):
     if uploaded_files:
-        # Dictionary to hold the fresh data from the screenshots
         scanned_data = {}
         
         for uploaded_file in uploaded_files:
@@ -52,34 +51,39 @@ if st.button("🚀 Process Uploaded Screenshots"):
                 lines = text.split('\n')
                 
                 for line in lines:
-                    # Match Ticker, skip balance, capture Quantity
-                    match = re.search(r'([A-Z]{2,5}).*?\$[\d,]+\.\d{2}\s+(\d+\.\d{3})', line)
+                    # FIX: \b boundaries ensure full word extraction (fixes CV vs CVS). 
+                    # FIX: Removing \$ reliance ensures VOO/VTI aren't skipped if OCR misses the dollar symbol.
+                    match = re.search(r'\b([A-Z]{2,5})\b.*?(?:[\d,]+\.\d{2})\s+(\d+\.\d{3})\b', line)
                     if match:
                         ticker = match.group(1).strip().upper()
                         shares = float(match.group(2).replace(',', ''))
                         
-                        # Ignore misreads or headers
-                        if len(ticker) < 2 or ticker in ['LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE', 'ETFS']: 
+                        # Enhanced filter to catch structural table words
+                        ignore_list = [
+                            'LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE', 'ETFS', 
+                            'FUNDS', 'STOCKS', 'OPTIONS', 'SYMBOL', 'CURRENT', 'BALANCE', 'QUANTITY'
+                        ]
+                        
+                        if len(ticker) < 2 or ticker in ignore_list: 
                             continue
                         
-                        # Add to our fresh data dictionary
                         scanned_data[ticker] = shares
                 
                 st.success(f"Finished processing {uploaded_file.name}")
         
-        # Overwrite logic: Replace old portfolio entirely if we found new data
+        # Overwrite logic
         if scanned_data:
             st.session_state.portfolio = pd.DataFrame({
                 "Ticker": list(scanned_data.keys()),
                 "Shares": list(scanned_data.values())
             })
             
-            # Clear the data_editor's internal state so it is forced to load the new overwrite
+            # Clear editor state to force UI refresh
             if "portfolio_editor" in st.session_state:
                 del st.session_state["portfolio_editor"]
                 
             st.success("Spreadsheet successfully overwritten with scanned data!")
-            st.rerun() # Refresh the app safely inside the button block to show the new table
+            st.rerun()
             
     else:
         st.warning("Please upload files first.")
