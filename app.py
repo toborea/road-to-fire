@@ -41,6 +41,9 @@ uploaded_files = st.file_uploader("Upload Brokerage Screenshots", type=["png", "
 
 if st.button("🚀 Process Uploaded Screenshots"):
     if uploaded_files:
+        # Dictionary to hold the fresh data from the screenshots
+        scanned_data = {}
+        
         for uploaded_file in uploaded_files:
             image = Image.open(uploaded_file)
             with st.spinner(f"Processing {uploaded_file.name}..."):
@@ -49,24 +52,35 @@ if st.button("🚀 Process Uploaded Screenshots"):
                 lines = text.split('\n')
                 
                 for line in lines:
-                    # UPDATED REGEX: Specifically looks for lines that contain a ticker-like string and a price/quantity sequence
+                    # Match Ticker, skip balance, capture Quantity
                     match = re.search(r'([A-Z]{2,5}).*?\$[\d,]+\.\d{2}\s+(\d+\.\d{3})', line)
                     if match:
                         ticker = match.group(1).strip().upper()
                         shares = float(match.group(2).replace(',', ''))
                         
-                        # CLEANUP: Ignore weird small strings that OCR misidentifies as tickers
+                        # Ignore misreads or headers
                         if len(ticker) < 2 or ticker in ['LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE', 'ETFS']: 
                             continue
                         
-                        # Update existing or add new
-                        if ticker in st.session_state.portfolio["Ticker"].str.upper().values:
-                            st.session_state.portfolio.loc[st.session_state.portfolio["Ticker"].str.upper() == ticker, "Shares"] = shares
-                        else:
-                            new_row = pd.DataFrame({"Ticker": [ticker], "Shares": [shares]})
-                            st.session_state.portfolio = pd.concat([st.session_state.portfolio, new_row], ignore_index=True)
+                        # Add to our fresh data dictionary
+                        scanned_data[ticker] = shares
                 
                 st.success(f"Finished processing {uploaded_file.name}")
+        
+        # Overwrite logic: Replace old portfolio entirely if we found new data
+        if scanned_data:
+            st.session_state.portfolio = pd.DataFrame({
+                "Ticker": list(scanned_data.keys()),
+                "Shares": list(scanned_data.values())
+            })
+            
+            # Clear the data_editor's internal state so it is forced to load the new overwrite
+            if "portfolio_editor" in st.session_state:
+                del st.session_state["portfolio_editor"]
+                
+            st.success("Spreadsheet successfully overwritten with scanned data!")
+            st.rerun() # Refresh the app safely inside the button block to show the new table
+            
     else:
         st.warning("Please upload files first.")
 
