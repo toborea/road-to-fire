@@ -39,27 +39,21 @@ if uploaded_files:
     for uploaded_file in uploaded_files:
         image = Image.open(uploaded_file)
         with st.spinner(f"Processing {uploaded_file.name}..."):
-            # Extract text from image
             text = pytesseract.image_to_string(image)
             secure_cleanup(image)
             
-            # This logic splits the text by lines to look for the pattern line-by-line
             lines = text.split('\n')
             found_data = False
-            
             for line in lines:
-                # Look for lines that contain a ticker and a number
-                # Regex looks for Ticker (uppercase, 1-5 letters) followed by some characters, then a decimal number
+                # Regex looks for Ticker (uppercase, 1-5 letters) followed by any characters, then a decimal number
                 match = re.search(r'\b([A-Z]{1,5})\b.*?\b(\d{1,3}(?:,\d{3})*\.\d{3})\b', line)
-                
                 if match:
                     ticker = match.group(1)
                     shares_str = match.group(2).replace(',', '')
                     shares = float(shares_str)
-                    
-                    if ticker in ['LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY']:
+                    if ticker in ['LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE']:
                         continue
-                        
+                    
                     if ticker in st.session_state.portfolio["Ticker"].values:
                         st.session_state.portfolio.loc[st.session_state.portfolio["Ticker"] == ticker, "Shares"] = shares
                     else:
@@ -70,7 +64,7 @@ if uploaded_files:
             if found_data:
                 st.success(f"Successfully processed {uploaded_file.name}")
             else:
-                st.warning(f"Could not map data in {uploaded_file.name}. OCR text was: {text[:100]}...") # Debug info
+                st.warning(f"Could not map data in {uploaded_file.name}. Ensure you are using the 'Table' view.")
     st.rerun()
 
 # --- FEATURE: MASTER PORTFOLIO EDITOR ---
@@ -86,16 +80,39 @@ edited_df = st.data_editor(
 )
 st.session_state.portfolio = edited_df
 
-# --- FEATURE: LIVE ANALYSIS & PROJECTION ---
+# --- FEATURE: LIVE ANALYSIS, ADVICE & PROJECTION ---
 if not edited_df.empty:
+    live_data = []
     total_brokerage_value = 0.0
-    with st.spinner("Fetching live prices..."):
+    tickers_str = " ".join(edited_df["Ticker"].astype(str).tolist())
+    
+    with st.spinner("Fetching live prices & checking health..."):
         for _, row in edited_df.iterrows():
+            ticker = str(row["Ticker"]).upper().strip()
+            shares = float(row["Shares"])
             try:
-                price = yf.Ticker(str(row["Ticker"])).info.get('currentPrice') or 0
-                total_brokerage_value += (price * float(row["Shares"]))
+                asset = yf.Ticker(ticker)
+                info = asset.info
+                price = info.get('currentPrice') or info.get('regularMarketPrice')
+                er = info.get('annualReportExpenseRatio') or info.get('expenseRatio', 0)
+                er_pct = er * 100 if er else 0.0
+                
+                if price:
+                    total_brokerage_value += (price * shares)
+                    live_data.append({"Ticker": ticker, "Raw ER": er_pct})
             except: pass
 
+    # Automated Advice
+    st.subheader("Automated Portfolio Advice")
+    if "VOO" in tickers_str and "VFIAX" in tickers_str:
+        st.error("⚠️ **Redundancy Alert:** You hold both VOO and VFIAX (identical S&P 500 tracking). Consolidate into one.")
+    if "VOO" in tickers_str and "VTI" in tickers_str:
+        st.warning("⚠️ **Overlap Alert:** VTI is 85% identical to VOO. Holding both creates unnecessary duplication.")
+    for item in live_data:
+        if item.get("Raw ER", 0) > 0.15:
+            st.warning(f"⚠️ **Fee Notice:** {item['Ticker']} has an expense ratio of {item['Raw ER']:.2f}%. Watch for fee drag.")
+
+    # Projection
     st.subheader("The Path to $500,000")
     total_current = hysa_bal + total_brokerage_value
     col1, col2, col3 = st.columns(3)
