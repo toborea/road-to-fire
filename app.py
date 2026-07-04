@@ -39,7 +39,6 @@ brok_return = st.sidebar.slider("Expected Market Return (%)", 4.0, 15.0, 9.0, 0.
 st.subheader("📷 Auto-Update Tickers & Shares")
 uploaded_files = st.file_uploader("Upload Brokerage Screenshots", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
 
-# Process only when button is pressed to prevent infinite loop
 if st.button("🚀 Process Uploaded Screenshots"):
     if uploaded_files:
         for uploaded_file in uploaded_files:
@@ -48,23 +47,26 @@ if st.button("🚀 Process Uploaded Screenshots"):
                 text = pytesseract.image_to_string(image)
                 secure_cleanup(image)
                 lines = text.split('\n')
-                found_data = False
+                
                 for line in lines:
+                    # Regex for Ticker and Shares
                     match = re.search(r'\b([A-Z]{1,5})\b.*?\b(\d{1,3}(?:,\d{3})*\.\d{3})\b', line)
                     if match:
-                        ticker = match.group(1)
+                        # Fix: Normalize string to prevent duplication/mismatch
+                        ticker = match.group(1).strip().upper() 
                         shares_str = match.group(2).replace(',', '')
                         shares = float(shares_str)
+                        
                         if ticker in ['LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE']: continue
                         
-                        if ticker in st.session_state.portfolio["Ticker"].values:
-                            st.session_state.portfolio.loc[st.session_state.portfolio["Ticker"] == ticker, "Shares"] = shares
+                        # Update logic
+                        if ticker in st.session_state.portfolio["Ticker"].str.upper().values:
+                            st.session_state.portfolio.loc[st.session_state.portfolio["Ticker"].str.upper() == ticker, "Shares"] = shares
                         else:
                             new_row = pd.DataFrame({"Ticker": [ticker], "Shares": [shares]})
                             st.session_state.portfolio = pd.concat([st.session_state.portfolio, new_row], ignore_index=True)
-                        found_data = True
-                if found_data: st.success(f"Successfully processed {uploaded_file.name}")
-                else: st.warning(f"Could not map data in {uploaded_file.name}.")
+                
+                st.success(f"Finished processing {uploaded_file.name}")
     else:
         st.warning("Please upload files first.")
 
