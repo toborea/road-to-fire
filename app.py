@@ -17,7 +17,7 @@ def secure_cleanup(image_obj):
     del image_obj
     gc.collect()
 
-# Initialize session state
+# Initialize session state (Your starting/dummy data)
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = pd.DataFrame({
         "Ticker": ["VOO", "VFIAX", "VTI", "VTV", "VT", "VXUS", "IJH", "AMD", "GOOGL", "CVS"],
@@ -46,43 +46,54 @@ if st.button("🚀 Process Uploaded Screenshots"):
         for uploaded_file in uploaded_files:
             image = Image.open(uploaded_file)
             with st.spinner(f"Processing {uploaded_file.name}..."):
-                text = pytesseract.image_to_string(image)
+                # FIX: --psm 6 forces Tesseract to read text in uniform horizontal rows (perfect for UI tables)
+                text = pytesseract.image_to_string(image, config='--psm 6')
                 secure_cleanup(image)
-                lines = text.split('\n')
                 
-                for line in lines:
-                    # FIX: \b boundaries ensure full word extraction (fixes CV vs CVS). 
-                    # FIX: Removing \$ reliance ensures VOO/VTI aren't skipped if OCR misses the dollar symbol.
-                    match = re.search(r'\b([A-Z]{2,5})\b.*?(?:[\d,]+\.\d{2})\s+(\d+\.\d{3})\b', line)
+                for line in text.split('\n'):
+                    # FIX: Find 1-5 letters at the START of the line, then skip forward to the FIRST 3-decimal number.
+                    # This completely bypasses misread dollar signs or long company names.
+                    match = re.search(r'^\s*[^a-zA-Z]*([A-Z]{1,5})\b.*?(\d+[\.,]\d{3})\b', line)
+                    
                     if match:
                         ticker = match.group(1).strip().upper()
-                        shares = float(match.group(2).replace(',', ''))
+                        # If OCR accidentally reads a comma instead of a period for shares (e.g., 78,467), fix it
+                        shares_str = match.group(2).replace(',', '.')
+                        shares = float(shares_str)
                         
-                        # Enhanced filter to catch structural table words
+                        # Extended filter to catch headers or structural UI text that might look like tickers
                         ignore_list = [
                             'LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE', 'ETFS', 
-                            'FUNDS', 'STOCKS', 'OPTIONS', 'SYMBOL', 'CURRENT', 'BALANCE', 'QUANTITY'
+                            'FUNDS', 'STOCKS', 'OPTIONS', 'SYMBOL', 'CURRENT', 'BALANCE', 
+                            'QUANTITY', 'YTD', 'DAY', 'CORE', 'CORP', 'INC'
                         ]
                         
-                        if len(ticker) < 2 or ticker in ignore_list: 
-                            continue
-                        
-                        scanned_data[ticker] = shares
+                        if ticker not in ignore_list:
+                            scanned_data[ticker] = shares
                 
                 st.success(f"Finished processing {uploaded_file.name}")
         
-        # Overwrite logic
+        # FIX: Merge (Upsert) logic instead of complete wipe
         if scanned_data:
+            # Get current table as a dictionary
+            curr_df = st.session_state.portfolio
+            curr_dict = dict(zip(curr_df['Ticker'], curr_df['Shares']))
+            
+            # Update dictionary with new scanned values (adds new ones, updates existing ones, keeps typed ones)
+            for t, s in scanned_data.items():
+                curr_dict[t] = s
+                
+            # Convert back to DataFrame
             st.session_state.portfolio = pd.DataFrame({
-                "Ticker": list(scanned_data.keys()),
-                "Shares": list(scanned_data.values())
+                "Ticker": list(curr_dict.keys()),
+                "Shares": list(curr_dict.values())
             })
             
             # Clear editor state to force UI refresh
             if "portfolio_editor" in st.session_state:
                 del st.session_state["portfolio_editor"]
                 
-            st.success("Spreadsheet successfully overwritten with scanned data!")
+            st.success("Spreadsheet successfully updated and merged with scanned data!")
             st.rerun()
             
     else:
