@@ -138,4 +138,94 @@ with st.spinner("Fetching live prices..."):
                 live_details.append({
                     "Ticker": ticker, 
                     "Shares": shares, 
-                    "Live Price": f"${price:,.2f}",
+                    "Live Price": f"${price:,.2f}", 
+                    "Total Value": f"${(price * shares):,.2f}", 
+                    "ER": er*100
+                })
+        except: pass
+
+if live_details:
+    st.table(pd.DataFrame(live_details).set_index("Ticker"))
+
+# Advice
+st.subheader("Automated Portfolio Advice")
+if "VOO" in tickers_str and "VFIAX" in tickers_str: st.error("⚠️ Redundancy: Consolidate VOO and VFIAX.")
+if "VOO" in tickers_str and "VTI" in tickers_str: st.warning("⚠️ Overlap: VTI is 85% identical to VOO.")
+for item in live_details:
+    if item.get("ER", 0) > 0.15: st.warning(f"⚠️ Fee Notice: {item['Ticker']} has an expense ratio of {item.get('ER', 0):.2f}%.")
+
+# --- FEATURE: SNAPSHOTS & PROJECTION ---
+st.subheader("Current Values & Net Worth")
+col1, col2, col3 = st.columns(3)
+col1.metric("Cash (HYSA)", f"${hysa_bal:,.2f}")
+col2.metric("Brokerage (Live)", f"${total_brokerage_value:,.2f}")
+col3.metric("Total Net Worth", f"${(hysa_bal + total_brokerage_value):,.2f}")
+
+st.subheader("Historical Snapshots & Projection")
+if st.button("💾 Save Current Net Worth Snapshot"):
+    new_snapshot = pd.DataFrame({
+        "Date": [datetime.now().strftime("%Y-%m-%d")], 
+        "HYSA": [hysa_bal], 
+        "Brokerage": [total_brokerage_value], 
+        "Total": [hysa_bal + total_brokerage_value]
+    })
+    st.session_state.history = pd.concat([st.session_state.history, new_snapshot], ignore_index=True)
+
+if not st.session_state.history.empty:
+    st.write("### Your Progress")
+    st.line_chart(st.session_state.history.set_index("Date")[["HYSA", "Brokerage", "Total"]])
+
+st.write("### Future Projection to $500k")
+
+# Initialize variables for your current split strategy
+months, hysa_curr, brok_curr = 0, hysa_bal, total_brokerage_value
+
+# Initialize variables for the hypothetical 100% strategies
+# We pool the starting balances and the monthly contributions together
+all_voo_curr = hysa_bal + total_brokerage_value
+all_hysa_curr = hysa_bal + total_brokerage_value
+total_cont = hysa_cont + brok_cont
+
+proj_data = [{
+    "Month": 0, 
+    "HYSA": hysa_curr, 
+    "Brokerage": brok_curr,
+    "All VOO": all_voo_curr,
+    "All HYSA": all_hysa_curr
+}]
+
+# Run the projection loop
+while (hysa_curr + brok_curr) < 500000 and months < 120:
+    months += 1
+    
+    # 1. Current Split Strategy
+    hysa_curr = (hysa_curr * (1 + hysa_yield/12)) + hysa_cont
+    brok_curr = (brok_curr * (1 + brok_return/12)) + brok_cont
+    
+    # 2. Hypothetical: 100% VOO / Market
+    all_voo_curr = (all_voo_curr * (1 + brok_return/12)) + total_cont
+    
+    # 3. Hypothetical: 100% HYSA / Cash
+    all_hysa_curr = (all_hysa_curr * (1 + hysa_yield/12)) + total_cont
+    
+    proj_data.append({
+        "Month": months, 
+        "HYSA": hysa_curr, 
+        "Brokerage": brok_curr,
+        "All VOO": all_voo_curr,
+        "All HYSA": all_hysa_curr
+    })
+
+df_proj = pd.DataFrame(proj_data).set_index("Month")
+fig = go.Figure()
+
+# Plot Current Strategy (Stacked Area Chart)
+fig.add_trace(go.Scatter(x=df_proj.index, y=df_proj["HYSA"], name="Current: HYSA", stackgroup='one', line=dict(color='#3b82f6')))
+fig.add_trace(go.Scatter(x=df_proj.index, y=df_proj["Brokerage"], name="Current: Brokerage", stackgroup='one', line=dict(color='#10b981')))
+
+# Plot Hypothetical Strategies (Dashed Overlay Lines)
+fig.add_trace(go.Scatter(x=df_proj.index, y=df_proj["All VOO"], name="If 100% in VOO", line=dict(color='#f59e0b', dash='dash')))
+fig.add_trace(go.Scatter(x=df_proj.index, y=df_proj["All HYSA"], name="If 100% in HYSA", line=dict(color='#ef4444', dash='dash')))
+
+fig.update_layout(template="plotly_dark", height=400, xaxis_title="Months", yaxis_title="Total Value ($)")
+st.plotly_chart(fig, use_container_width=True)
