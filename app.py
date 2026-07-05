@@ -50,35 +50,45 @@ if st.button("🚀 Process Uploaded Screenshots"):
                 secure_cleanup(image)
                 
                 for line in text.split('\n'):
-                    # Match alphanumeric tickers to prevent chopping "CV5" into "CV"
-                    match = re.search(r'^\s*[^a-zA-Z]*([A-Z0-9]{1,5})\b.*?([\d,]+[.,]\d{3})(?!\d|\.)', line)
+                    # RULE 1: Find the exact number with 3 decimal places (Shares)
+                    shares_match = re.search(r'([\d,]+\.\d{3})\b', line)
                     
-                    if match:
-                        raw_ticker = match.group(1).strip().upper()
+                    if shares_match:
+                        raw_shares = shares_match.group(1)
                         
-                        # Translate common OCR number misreads back into their correct letters
-                        ticker = raw_ticker.replace('5', 'S').replace('0', 'O').replace('1', 'I')
-                        
-                        raw_shares = match.group(2)
-                        
-                        # Decimal conversion handling for European/US formatting quirks
-                        if len(raw_shares) >= 4 and raw_shares[-4] in [',', '.']:
-                            whole_part = raw_shares[:-4].replace(',', '').replace('.', '')
-                            fractional_part = raw_shares[-3:]
-                            if not whole_part: whole_part = "0"
-                            shares = float(f"{whole_part}.{fractional_part}")
+                        # RULE 2: Grab text prior to the first '$' (Ticker)
+                        if '$' in line:
+                            prefix = line.split('$')[0]
                         else:
-                            shares = float(raw_shares.replace(',', '.'))
+                            prefix = line.split(raw_shares)[0]
+                            
+                        first_word_match = re.search(r'([A-Za-z0-9]+)', prefix)
                         
-                        # Filter out common UI headers
-                        ignore_list = [
-                            'LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE', 'ETFS', 
-                            'FUNDS', 'STOCKS', 'OPTIONS', 'SYMBOL', 'CURRENT', 'BALANCE', 
-                            'QUANTITY', 'YTD', 'DAY', 'CORE', 'CORP', 'INC'
-                        ]
-                        
-                        if ticker not in ignore_list:
-                            scanned_data[ticker] = shares
+                        if first_word_match:
+                            raw_ticker = first_word_match.group(1).upper()
+                            
+                            # Fix OCR spacing hallucinations (e.g., turning "C VS" safely into "CVS")
+                            letters_only = re.sub(r'[^A-Za-z0-9]', '', prefix).upper()
+                            if 0 < len(letters_only) <= 6:
+                                raw_ticker = letters_only
+                                
+                            # Fix common OCR number misreads
+                            ticker = raw_ticker.replace('5', 'S').replace('0', 'O').replace('1', 'I')
+                            
+                            try:
+                                shares = float(raw_shares.replace(',', ''))
+                                
+                                # Filter out common UI headers
+                                ignore_list = [
+                                    'LIST', 'TABLE', 'TOTAL', 'NAME', 'QTY', 'PRICE', 'ETFS', 
+                                    'FUNDS', 'STOCKS', 'OPTIONS', 'SYMBOL', 'CURRENT', 'BALANCE', 
+                                    'QUANTITY', 'YTD', 'DAY', 'CORE', 'CORP', 'INC', 'MUTUAL'
+                                ]
+                                
+                                if ticker not in ignore_list and len(ticker) <= 6:
+                                    scanned_data[ticker] = shares
+                            except ValueError:
+                                pass
                 
                 st.success(f"Finished processing {uploaded_file.name}")
         
@@ -181,7 +191,6 @@ st.write("### Future Projection to $500k")
 months, hysa_curr, brok_curr = 0, hysa_bal, total_brokerage_value
 
 # Initialize variables for the hypothetical 100% strategies
-# We pool the starting balances and the monthly contributions together
 all_voo_curr = hysa_bal + total_brokerage_value
 all_hysa_curr = hysa_bal + total_brokerage_value
 total_cont = hysa_cont + brok_cont
