@@ -50,16 +50,18 @@ if st.button("🚀 Process Uploaded Screenshots"):
                 secure_cleanup(image)
                 
                 for line in text.split('\n'):
-                    # FIX: The regex now uses a Negative Lookahead (?!\d|\.). 
-                    # This prevents the scanner from grabbing the thousands comma in account balances (e.g., $9,205.72)
-                    match = re.search(r'^\s*[^a-zA-Z]*([A-Z]{1,5})\b.*?([\d,]+[.,]\d{3})(?!\d|\.)', line)
+                    # FIX: Allow numbers in the initial ticker match [A-Z0-9] so it doesn't clip "CV5" into "CV"
+                    match = re.search(r'^\s*[^a-zA-Z]*([A-Z0-9]{1,5})\b.*?([\d,]+[.,]\d{3})(?!\d|\.)', line)
                     
                     if match:
-                        ticker = match.group(1).strip().upper()
+                        raw_ticker = match.group(1).strip().upper()
+                        
+                        # FIX: Translate common OCR number misreads back into their correct letters
+                        ticker = raw_ticker.replace('5', 'S').replace('0', 'O').replace('1', 'I')
+                        
                         raw_shares = match.group(2)
                         
-                        # FIX: Bulletproof decimal conversion. 
-                        # Whether OCR reads "13.331", "13,331", or "1,234.567", this handles it safely.
+                        # Decimal conversion
                         if len(raw_shares) >= 4 and raw_shares[-4] in [',', '.']:
                             whole_part = raw_shares[:-4].replace(',', '').replace('.', '')
                             fractional_part = raw_shares[-3:]
