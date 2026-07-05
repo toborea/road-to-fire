@@ -50,18 +50,18 @@ if st.button("🚀 Process Uploaded Screenshots"):
                 secure_cleanup(image)
                 
                 for line in text.split('\n'):
-                    # FIX: Allow numbers in the initial ticker match [A-Z0-9] so it doesn't clip "CV5" into "CV"
+                    # Match alphanumeric tickers to prevent chopping "CV5" into "CV"
                     match = re.search(r'^\s*[^a-zA-Z]*([A-Z0-9]{1,5})\b.*?([\d,]+[.,]\d{3})(?!\d|\.)', line)
                     
                     if match:
                         raw_ticker = match.group(1).strip().upper()
                         
-                        # FIX: Translate common OCR number misreads back into their correct letters
+                        # Translate common OCR number misreads back into their correct letters
                         ticker = raw_ticker.replace('5', 'S').replace('0', 'O').replace('1', 'I')
                         
                         raw_shares = match.group(2)
                         
-                        # Decimal conversion
+                        # Decimal conversion handling for European/US formatting quirks
                         if len(raw_shares) >= 4 and raw_shares[-4] in [',', '.']:
                             whole_part = raw_shares[:-4].replace(',', '').replace('.', '')
                             fractional_part = raw_shares[-3:]
@@ -138,55 +138,4 @@ with st.spinner("Fetching live prices..."):
                 live_details.append({
                     "Ticker": ticker, 
                     "Shares": shares, 
-                    "Live Price": f"${price:,.2f}", 
-                    "Total Value": f"${(price * shares):,.2f}", 
-                    "ER": er*100
-                })
-        except: pass
-
-if live_details:
-    st.table(pd.DataFrame(live_details).set_index("Ticker"))
-
-# Advice
-st.subheader("Automated Portfolio Advice")
-if "VOO" in tickers_str and "VFIAX" in tickers_str: st.error("⚠️ Redundancy: Consolidate VOO and VFIAX.")
-if "VOO" in tickers_str and "VTI" in tickers_str: st.warning("⚠️ Overlap: VTI is 85% identical to VOO.")
-for item in live_details:
-    if item.get("ER", 0) > 0.15: st.warning(f"⚠️ Fee Notice: {item['Ticker']} has an expense ratio of {item.get('ER', 0):.2f}%.")
-
-# --- FEATURE: SNAPSHOTS & PROJECTION ---
-st.subheader("Current Values & Net Worth")
-col1, col2, col3 = st.columns(3)
-col1.metric("Cash (HYSA)", f"${hysa_bal:,.2f}")
-col2.metric("Brokerage (Live)", f"${total_brokerage_value:,.2f}")
-col3.metric("Total Net Worth", f"${(hysa_bal + total_brokerage_value):,.2f}")
-
-st.subheader("Historical Snapshots & Projection")
-if st.button("💾 Save Current Net Worth Snapshot"):
-    new_snapshot = pd.DataFrame({
-        "Date": [datetime.now().strftime("%Y-%m-%d")], 
-        "HYSA": [hysa_bal], 
-        "Brokerage": [total_brokerage_value], 
-        "Total": [hysa_bal + total_brokerage_value]
-    })
-    st.session_state.history = pd.concat([st.session_state.history, new_snapshot], ignore_index=True)
-
-if not st.session_state.history.empty:
-    st.write("### Your Progress")
-    st.line_chart(st.session_state.history.set_index("Date")[["HYSA", "Brokerage", "Total"]])
-
-st.write("### Future Projection to $500k")
-months, hysa_curr, brok_curr = 0, hysa_bal, total_brokerage_value
-proj_data = [{"Month": 0, "HYSA": hysa_curr, "Brokerage": brok_curr}]
-while (hysa_curr + brok_curr) < 500000 and months < 120:
-    months += 1
-    hysa_curr = (hysa_curr * (1 + hysa_yield/12)) + hysa_cont
-    brok_curr = (brok_curr * (1 + brok_return/12)) + brok_cont
-    proj_data.append({"Month": months, "HYSA": hysa_curr, "Brokerage": brok_curr})
-
-df_proj = pd.DataFrame(proj_data).set_index("Month")
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=df_proj.index, y=df_proj["HYSA"], name="HYSA", stackgroup='one', line=dict(color='#3b82f6')))
-fig.add_trace(go.Scatter(x=df_proj.index, y=df_proj["Brokerage"], name="Brokerage", stackgroup='one', line=dict(color='#10b981')))
-fig.update_layout(template="plotly_dark", height=400, xaxis_title="Months", yaxis_title="Total Value ($)")
-st.plotly_chart(fig, use_container_width=True)
+                    "Live Price": f"${price:,.2f}",
